@@ -50,5 +50,40 @@ def visualize_keyframe_position(poses_path, sequence, keyframe_number, number_of
     return rotate_pcd(mesh_box)
 
 
+def remove_points_within_radius(point_cloud_1, point_cloud_2, radius):
+    """
+    Removes points from point_cloud_1 that are within a given radius of points in point_cloud_2.
 
+    Arguments:
+    - point_cloud_1: open3d.geometry.PointCloud object representing the first point cloud
+    - point_cloud_2: open3d.geometry.PointCloud object representing the second point cloud
+    - radius: float value representing the radius within which points are considered close
+
+    Returns:
+    - filtered_point_cloud: open3d.geometry.PointCloud object representing the filtered point cloud
+    """
+    points_1 = np.asarray(point_cloud_1.points)
+    points_2 = np.asarray(point_cloud_2.points)
+
+    kd_tree = o3d.geometry.KDTreeFlann()
+    kd_tree.set_geometry(point_cloud_2)
+
+    distances = []
+    indices = []
+    for point in points_1:
+        [_, idx, _] = kd_tree.search_radius_vector_3d(point, radius)
+        if len(idx) == 0:
+            distances.append(float('inf'))
+        else:
+            distances.append(np.min(np.linalg.norm(points_2[idx] - point, axis=1)))
+        indices.append(idx)
+
+    mask = np.array(distances) > radius
+    filtered_points = points_1[mask]
+    filtered_colors = np.asarray(point_cloud_1.colors)[mask]
+    filtered_point_cloud = o3d.geometry.PointCloud()
+    filtered_point_cloud.points = o3d.utility.Vector3dVector(filtered_points)
+    filtered_point_cloud.colors = o3d.utility.Vector3dVector(filtered_colors)
+
+    return filtered_point_cloud
 

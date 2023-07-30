@@ -1,18 +1,20 @@
-preprocess_pcd.rotate = True
-preprocess_pcd.crop = True
-preprocess_pcd.paint_uniform = True
+preprocess_pcd.rotate = False
+preprocess_pcd.crop = False
+preprocess_pcd.paint_uniform = False
 preprocess_pcd.vis_before_after = True
 slice_in_given_dimension.plot_histogram = False
 preprocess_pcd.show_keyframe_position = False
-slice_in_given_dimension.surface_mesh = True
+slice_in_given_dimension.surface_mesh = False
 
 
-##### Load Poincloud ##### - Sequence 00 - 1680-2150
+##### Load data ##### - Sequence 00 - 1680-2150
 load_point_cloud.path = '/home/lukas/PycharmProjects/MonoRec/saved/pointclouds/monorec'
+poses_path = '/home/lukas/PycharmProjects/MonoRec/data/dataset/poses_dvso'
+sequence = '00'
 #load_point_cloud.filename = 'seequence_00_6fr.ply' #'seequence_00_2fr.ply', 'seequence_00_4fr.ply'
 #load_point_cloud.filename = 'seequence_00_02fr_1680-1890.ply'
 load_point_cloud.filename = 'seequence_00_06fr_1680-2150_roi230.ply'
-
+#load_point_cloud.filename = 'seequence_00_04fr_1680-2150_roi230_320x640.ply'
 
 ##### Preprocess point cloud #####
 # Rotate
@@ -26,10 +28,8 @@ paint_uniform_pcd.color = [0.8, 0.8, 0.8]
 
 ###### Utils and Tools
 # Visualize Keyframe position
-visualize_keyframe_position.poses_path = '/home/lukas/PycharmProjects/MonoRec/data/dataset/poses_dvso'
 visualize_keyframe_position.number_of_sub_frames = 2
-visualize_keyframe_position.keyframe_number = 1890
-visualize_keyframe_position.sequence = '00'
+visualize_keyframe_position.keyframe_number = 2000
 
 # Estimate vertex normals
 estimate_vertex_normals.radius = 0.1
@@ -45,3 +45,13 @@ slice_in_given_dimension.plot_histogram_first_dim_position = 0.5 # Percentage [0
 
 ###### Reconstruct mesh from point cloud
 reconstruct_mesh.mesh_method = 'poisson' #'ball_pivoting' or 'poisson'
+
+##### Automatic Road extraction
+get_poses.start_frame = 1680
+get_poses.end_frame = 2150
+
+
+get_poses.poses_path = %poses_path
+get_poses.sequence = %sequence
+visualize_keyframe_position.poses_path = %poses_path
+visualize_keyframe_position.sequence = %sequence

@@ -94,11 +94,24 @@ def reconstruct_mesh(road_topology, mesh_method):
     #o3d.io.write_triangle_mesh("poisson_rec.obj", mesh)
 
 
+def in_for_loops(pcd_array, slice_dimension, hist_window_size, bb_free):
+    # Calculate the minimum possible value in given dimension
+    min_value = np.min(pcd_array[:, slice_dimension])
+
+    # Calculate number of iterations
+    # Get the maximum possible value in given dimension
+    max_value = np.max(pcd_array[:, slice_dimension])
+    # Calculate how many bounding boxes fit between max_value and min_value
+    num_interations = math.ceil(max_value - min_value) / (hist_window_size * bb_free)
+
+    return min_value, max_value, num_interations
+
+
 @gin.configurable
-def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions, estimation_variant, plot_histogram,
+def slice_in_given_dimension(pcd_array, hist_window_size, bb_overlap, slice_dimensions, estimation_variant, plot_histogram,
                              plot_histogram_first_dim_position, surface_mesh):
     # Convert open3D point cloud to numpy array
-    pcd_array = np.asarray(pcd.points)
+    #pcd_array = np.asarray(pcd.points)
 
     # Initialize lists
     est_road_topology, histogram_points = [], []
@@ -121,8 +134,10 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
         print('Continue with bb_overlap = 0!')
 
     # Calculate how many bounding boxes fit in between
-    first_dim_bound, _, num_iterations_first_dim = initialize_for_loops(pcd_array, first_dim,
-                                                                        hist_window_size, bb_free)
+    #first_dim_bound, _, num_iterations_first_dim = initialize_for_loops(pcd_array, first_dim,
+    #                                                                    hist_window_size, bb_free)
+
+    first_dim_bound, _, num_iterations_first_dim = in_for_loops(pcd_array, first_dim, hist_window_size, bb_free)
 
     # Calculate the position from where the histogram should be calculated
     histogram_position = int(num_iterations_first_dim * plot_histogram_first_dim_position)
@@ -142,9 +157,30 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
         # Move window
         first_dim_bound = first_dim_bound + hist_window_size*bb_free
 
+        # Continue loop if bounding box is empty
+        if len(slice_pcd_array) == 0:
+            continue
+
         # Calculate how many bounding boxes fit in between
-        second_dim_bound, _, num_iterations_second_dim = initialize_for_loops(slice_pcd_array, second_dim,
-                                                                              hist_window_size, bb_free)
+        #second_dim_bound, _, num_iterations_second_dim = initialize_for_loops(slice_pcd_array, second_dim,
+        #                                                                      hist_window_size, bb_free)
+
+        #second_dim_bound, _, num_iterations_second_dim = in_for_loops(slice_pcd_array, first_dim, hist_window_size, bb_free)
+
+        # Calculate the minimum possible value in given dimension
+        min_value = np.min(slice_pcd_array[:, 0])
+
+        # Calculate number of iterations
+        # Get the maximum possible value in given dimension
+        max_value = np.max(slice_pcd_array[:, 0])
+        # Calculate how many bounding boxes fit between max_value and min_value
+        num_iterations_second_dim = math.ceil(max_value - min_value) / (hist_window_size * bb_free)
+
+        second_dim_bound = min_value
+
+
+
+
 
         # SECOND: Slice in second dimension
         for bb_second_dim in range(int(num_iterations_second_dim)):
@@ -176,34 +212,39 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
 
             # Choose which variant is used as estimate for the y-coordinate
             if estimation_variant == 'mean':
-                new_y_coordinate = np.mean(bb_pcd_array[:, 1])
+                #new_y_coordinate = np.mean(bb_pcd_array[:, 1])
+                estimate_road_coordinate = np.mean(bb_pcd_array, axis=0)
             elif estimation_variant == 'median':
-                new_y_coordinate = np.median(bb_pcd_array[:, 1])
+                #new_y_coordinate = np.median(bb_pcd_array[:, 1])
+                estimate_road_coordinate = np.median(bb_pcd_array, axis=0)
             else:
                 print('No method selected to calculate y-Coordinate: proceed with median')
-                new_y_coordinate = np.median(bb_pcd_array[:, 1])
+                #new_y_coordinate = np.median(bb_pcd_array[:, 1])
+                estimate_road_coordinate = np.median(bb_pcd_array, axis=0)
 
             # Initialize
-            estimate_road_coordinate = [0, new_y_coordinate, 0]
+            #estimate_road_coordinate = [0, new_y_coordinate, 0]
 
-            estimate_road_coordinate[first_dim] = min_first_dim_bound + hist_window_size/2
-            estimate_road_coordinate[second_dim] = min_second_dim_bound + hist_window_size/2
+            #estimate_road_coordinate[first_dim] = min_first_dim_bound + hist_window_size/2
+            #estimate_road_coordinate[second_dim] = min_second_dim_bound + hist_window_size/2
 
             # Append new coordinate points to list
             est_road_topology.append(estimate_road_coordinate)
 
     # Show point cloud with road topology estimation
-    road_topology = o3d.geometry.PointCloud()
-    road_topology.points = o3d.utility.Vector3dVector(est_road_topology)
+    #road_topology = o3d.geometry.PointCloud()
+    #road_topology.points = o3d.utility.Vector3dVector(est_road_topology)
 
     # Plot histogram of road crossing
     if plot_histogram:
         histogram_from_bounding_boxes(histogram_points)
 
     # Weather to subsequently reconstruct surface mesh or only visualize point cloud
-    if surface_mesh:
-        # Reconstruct mesh from point cloud
-        reconstruct_mesh(road_topology)
-    else:
-        # Visualize road topology point cloud
-        o3d.visualization.draw_geometries([road_topology])
+    #if surface_mesh:
+    #    # Reconstruct mesh from point cloud
+    #    reconstruct_mesh(road_topology)
+    #else:
+    #    # Visualize road topology point cloud
+    #    o3d.visualization.draw_geometries([road_topology])
+
+    return est_road_topology
