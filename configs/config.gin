@@ -1,0 +1,77 @@
+##### CONFIGURATION FILE for the POST PROCESSING module #####
+# The model can be used in regular or evaluation mode. Please select the mode in the main.py using the FLAGS.
+# General Definition: Y-Axis = Height Axis
+
+#-------------------------------------------------------------------------------------
+##### REGULAR MODE #####
+# Overall settings
+load_configuration.pcd_filename = 'seequence_05_60-120_256.ply'     # MonoRec point cloud file name; Should be .ply
+get_poses.sequence = '05'                                           # Sequence number of the loaded MonoRec point cloud - values: ['00', '01', ... ]
+get_poses.start_frame = 60                                          # Number of the start frame
+get_poses.end_frame = 120                                           # Number of the end frame
+
+# Roadway extraction module - Define bounding box size and position; All values in meters
+construct_bounding_box_corners.roi_bb_width_r = 3                   # Bounding box width to the right side of the vehicle
+construct_bounding_box_corners.roi_bb_width_l = 3                   #                       ... left side of the vehicle
+construct_bounding_box_corners.roi_bb_dist = 0                      # Distance between the camera/vehicle and the bounding box
+select_points_in_volume.maximum_roadway_height = 0.5                # Maximum roadway height threshold
+
+# Denoising module - Define bounding box size, overlap or denoising methode
+slice_in_given_dimension.hist_window_size = 0.13                    # Quadratic bounding box size in the X-Z-plane in meters
+slice_in_given_dimension.bb_overlap = 0.2                           # Overlap of the bounding boxes in percentage - values: [0;1[
+slice_in_given_dimension.estimation_variant = 'mean'                # Denoising methode - values: ['mean', 'median']
+
+
+#-------------------------------------------------------------------------------------
+##### EVALUATION MODE - Further configurations #####
+extract_road.post_processing_mode = 'sequential'                    # Mode defining if the road extraction and the denoising should be performed
+                                                                    #  alternating for each frame or sequential after the whole section.
+                                                                    #  First mode simulates the real behaviour, second mode improves the visualization
+                                                                    #  for a qualitative evaluation - values: ['alternating', 'sequential']
+
+# PLOT: Road cross section
+# Positional configurations
+get_poses.cross_plot_start_frame = 65                               # Frame number where cross section plot is located (extrinsic parameters)
+construct_bounding_box_corners.eval_cs_plot_pos = 0.45              # Fine-tuning (road depth) for cross section plot position in meters
+construct_bounding_box_corners.eval_cs_plot_depth = 0.1             # Road depth for the road cross section plot in meters
+# Plot configurations
+road_cross_section_plot.rotation_angle = 0                          # Angle used to rotate points in plot (in degrees)
+road_cross_section_plot.y_axis_lim = [-0.2, 0.2]                    # Y-axis limits for final plot in meters
+
+# PLOT: Road longitudinal section
+# Positional configurations
+get_poses.long_plot_start_frame = 65                                # Frame number where longitudinal section plot is located (extrinsic parameters)
+construct_bounding_box_corners.eval_ls_plot_depth = 17              # Road depth for the road longitudinal section plot in meters
+construct_bounding_box_corners.eval_ls_plot_pos = 0                 # Fine-tuning (road width) for the road longitudinal section plot in meters
+construct_bounding_box_corners.eval_ls_plot_width = 0.1             # Road width for the road longitudinal section plot in meters
+# Plot configurations
+road_longitudinal_profile_plot.rotation_angle = 0                   # Angle used to rotate points in plot (in degrees)
+road_longitudinal_profile_plot.y_axis_lim = [-0.1, 0.1]             # Y-axis limits for final plot in meters
+
+
+# FINAL 3D VISUALIZATION:
+load_configuration_for_evaluation.angle_x = 0                       # Angle around the X-axis used to rotate post processed point cloud in degrees
+load_configuration_for_evaluation.angle_z = 0                       #              ... Z-axis used to rotate ...
+remove_points_within_radius.radius = 0.4                            # Remove points of MonoRec point cloud to fit post processed point cloud in one visualization
+                                                                    #  Radius defines the distance between first and second point cloud in meters
+process_for_evaluation.height_difference = 0.5                      # Height difference used to manually colorize the post processed point cloud in meters
+
+
+#-------------------------------------------------------------------------------------
+##### DONT CHANGE if algorithm was installed as described #####
+load_point_cloud.pcd_path = 'MonoRec/saved/pointclouds/monorec'     # Relative folder path where the point clouds are saved
+get_poses.poses_path = 'MonoRec/data/dataset/poses_dvso'            #                            ... estimated poses are saved
+select_points_in_volume.inverted_height_orientation = True          # Defining whether the height (Y-axis) in the estimated point clouds is inverted;
+                                                                    #  Standard value for MonoRec = True
+slice_in_given_dimension.slice_dimensions = [2, 0]                  # Dimensions to slice subsequently in the denoising module;
+                                                                    #  - values: [first dimension to slice, second dimension to slice]
+
+#-------------------------------------------------------------------------------------
+##### FURTHER UNIMPORTANT CONFIGURATIONS - UNUSED or NOT STABLE #####
+# Placeholder - Kept free for possible ground truth implementation
+load_configuration.pcd_gt_filename = ''
+load_configuration.use_gt = False
+
+# Possible histogram plots
+slice_in_given_dimension.plot_histogram = False
+slice_in_given_dimension.plot_histogram_first_dim_position = 0.5 # Percentage [0;1]
