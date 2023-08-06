@@ -31,3 +31,6 @@ The full installation manual and user manual can be found in the corresponding t
 To configure the algorithms output, use the ```config.gin``` file located under the ```configs``` folder.
 
 To switch between regular or evaluation mode, manually set the FLAG (global variable) in line ```12``` of the ```main.py``` to ```true``` or ```false```.
+
+## Test
+Added test files (```test/MonoRec/saved/pointclouds/monorec/seequence_05_60-120_256.ply``` and ```test/MonoRec/data/dataset/poses_dvso/05.txt```) for testing usage without MonoRec. The ```MonoRec``` folder should be placed next to this repository.
