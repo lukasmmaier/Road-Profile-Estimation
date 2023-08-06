@@ -4,30 +4,14 @@ import numpy as np
 import itertools
 
 
-@gin.configurable
-def rotate_pcd(pcd, angles):
-    ''' Rotates the given point cloud data (pcd) by using given angles for each axis [X, Y, Z]. '''
-    # Convert angles
-    angles = convert_angles(angles)
-
-    # Build rotational matrix
-    rotational_matrix = pcd.get_rotation_matrix_from_xyz((angles[0], angles[1], angles[2]))
-
-    # Rotate using rotational matrix R around center
-    return pcd.rotate(rotational_matrix, center=(0, 0, 0))
-
-
-def convert_angles(angles):
-    ''' Convert angles from degrees to radians. '''
-    for i, angle in enumerate(angles):
-        angles[i] = (angle / 180) * np.pi
-
-    return angles
-
-
-@gin.configurable
 def crop_pcd(pcd, bounds):
-    ''' Crops given point cloud data (pcd) to bounding box given through bounds. '''
+    """Crops given point cloud data (pcd) to bounding box given through bounds.
+    Args:
+        pcd (object): Open3D Point cloud data.
+        bounds (object): Open3D object defining the bounds.
+    Returns:
+        Cropped point cloud data.
+    """
     # Convert to numpy array
     bounds = np.array(bounds, dtype='float32')
 
@@ -40,8 +24,13 @@ def crop_pcd(pcd, bounds):
     return pcd.crop(bounding_box)
 
 
-@gin.configurable
 def paint_uniform_pcd(pcd, color):
-    ''' Print the given point cloud data (pcd) uniformly in a given color. '''
+    """Print the given point cloud data (pcd) uniformly in a given color.
+    Args:
+        pcd (object): Open3D Point cloud data.
+        color (list): List describing the color value as RGB-color.
+    Returns:
+        Colord pcd.
+    """
     # Paint the point cloud in given color
     return pcd.paint_uniform_color(color)

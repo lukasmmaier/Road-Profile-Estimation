@@ -2,71 +2,101 @@ import gin
 import os
 from absl import app, flags
 import open3d as o3d
-import numpy as np
 
 import extract_road
-from preprocessing.evaluation_processing import rotate_pcd, process_for_evaluation
-from preprocessing.preprocess import preprocess_pcd
-from utils_and_tools import o3d_tools
-from estimate_road_profile import slice_in_given_dimension
+from preprocessing.evaluation_processing import process_for_evaluation
+from utils_and_tools.o3d_tools import rotate_pcd, remove_points_within_radius
+
+FLAGS = flags.FLAGS
+# Global variable
+flags.DEFINE_boolean('evaluation', True, 'Specify weather to run algorithm in evaluation mode or not.')
 
 
 def main(argv):
     # Setup gin-config
     gin.parse_config_files_and_bindings([os.getcwd() + '/configs/config.gin'], [])
 
+    pcd_filename, pcd_gt_filename = load_configuration()
+
     # Load point cloud from MonoRec
-    pcd = load_point_cloud(filename="seequence_00_1870-1970.ply")
+    pcd = load_point_cloud(filename=pcd_filename)
 
-    # Load GT point cloud
-    pcd_gt = load_point_cloud(filename='seequence_05_0-250_gt.ply')
+    # Load ground truth (GT) point cloud
+    #pcd_gt = load_point_cloud(filename=pcd_gt_filename)
 
-    #pcd = rotate_pcd(pcd, [180, 0, 0])
-    #o3d.visualization.draw_geometries([pcd])
+    # Post processing module => Roadway extraction + Denonoising
+    road_profile_reconstruction, center = extract_road.extract_road(pcd)
 
-    # Preprocess point cloud data (pcd)
-    #pcd = preprocess_pcd(pcd=pcd)
-
-    road_profile_reconstruction, center = extract_road.extract_road(pcd, pcd_gt)
-
+    # Rotate estimates 180° - MonoRec outputs estimates upside down
     road_profile_reconstruction = rotate_pcd(road_profile_reconstruction, [180, 0, 0])
     pcd = rotate_pcd(pcd, [180, 0, 0])
 
-    angle_x = -1.8
-    angle_z = -1.8
-
-    pcd = rotate_pcd(pcd, [angle_x, 0, angle_z], center)
-
-    road_profile_reconstruction, pcd = process_for_evaluation(road_profile_reconstruction, pcd, [angle_x, 0, angle_z], center)
-
+    # Visualize estimate
     o3d.visualization.draw_geometries([road_profile_reconstruction])
 
+    # Further visualizations for evaluation
+    if FLAGS.evaluation:
+        angle_x, angle_z = load_configuration_for_evaluation()
 
-    def change_background_to_black(vis):
-        opt = vis.get_render_option()
-        opt.background_color = np.asarray([0, 0, 0])
-        return False
+        # Rotate pcd if desired and custom colorize the height information
+        pcd = rotate_pcd(pcd, [angle_x, 0, angle_z], center)
+        road_profile_reconstruction, pcd = process_for_evaluation(road_profile_reconstruction, pcd,
+                                                                  [angle_x, 0, angle_z], center)
 
-    key_to_callback = {}
-    key_to_callback[ord("K")] = change_background_to_black
-
-
-    # Remove road points from original pcd and input reconstruction for visualization
-    pcd = o3d_tools.remove_points_within_radius(pcd, road_profile_reconstruction, 0.4)
-    #o3d.visualization.draw_geometries([pcd, road_profile_reconstruction])
-
-    o3d.visualization.draw_geometries_with_key_callbacks([pcd, road_profile_reconstruction], key_to_callback)
+        # Remove road profile points from MonoRec pcd and input post processing pcd for visualization
+        pcd = remove_points_within_radius(pcd, road_profile_reconstruction)
+        o3d.visualization.draw_geometries([pcd, road_profile_reconstruction])
 
 
 @gin.configurable
-def load_point_cloud(filename, path):
-    # Get point cloud path from gin configuration
-    filepath = os.path.join(path, filename)
+def load_configuration(pcd_filename, pcd_gt_filename, use_gt):
+    """Load variables from gin-config.
+    Args:
+        pcd_filename (str): gin-configurable - Filename for input point cloud (= MonoRec output as .ply).
+        pcd_gt_filename (str): gin-configurable - Filename for ground truth point cloud.
+        use_gt (bool): gin-configurable - Variable defining, whether ground truth point cloud is used.
 
-    # Load point cloud
-    pcd = o3d.io.read_point_cloud(filepath)
+    Returns:
+        pcd_filename: Filename for input point cloud (= MonoRec output as .ply).
+        pcd_gt_filename: Filename for ground truth point cloud.
+    """
+    # Ground truth (gt) for evaluation (if available)
+    if not use_gt:
+        pcd_gt_filename = False
+
+    return pcd_filename, pcd_gt_filename
+
+
+@gin.configurable
+def load_point_cloud(filename, pcd_path):
+    """Load point cloud data (pcd) using open3D.
+    Args:
+        filename (str): Filename referring to point cloud file.
+        pcd_path (str): gin-configurable - Path where point clouds are stored.
+
+    Returns:
+        pcd: Open3D Point Cloud Data (PCD).
+    """
+    path = os.path.dirname(os.getcwd())
+    path = os.path.join(path, pcd_path)
+
+    if filename != False:
+        # Load point cloud
+        filepath = os.path.join(path, filename)
+        pcd = o3d.io.read_point_cloud(filepath)
+    else:
+        pcd = False
 
     return pcd
+
+@gin.configurable
+def load_configuration_for_evaluation(angle_x, angle_z):
+    """Load variables from gin-config.
+    Args/Returns:
+        angle_x (float): gin-configurable - Angle (in degrees) for the rotation of the pcd around the x-axis.
+        angle_z (float): gin-configurable - Angle (in degrees) for the rotation of the pcd around the z-axis.
+    """
+    return angle_x, angle_z
 
 
 if __name__ == '__main__':

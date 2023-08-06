@@ -1,6 +1,6 @@
 import gin
+from absl import app, flags
 import os
-import math
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
@@ -8,479 +8,573 @@ import matplotlib.ticker as ticker
 import time
 
 from estimate_road_profile import slice_in_given_dimension
-from preprocessing.evaluation_processing import rotate_pcd
+from utils_and_tools.o3d_tools import rotate_pcd
+
+FLAGS = flags.FLAGS
+
+
+def check_for_inconsistency(frame, start_frame, end_frame):
+    """Outputs a marker, that symbolises whether the frame lies between start and end frame or not.
+    Args:
+        frame (int): Frame number to check for inconsistency.
+        start_frame (int): Start frame defining the sequence start.
+        end_frame (int): End frame defining the sequence end.
+    Returns:
+        marker: Frame position relative to the start frame.
+    """
+    if (frame >= start_frame) and (frame <= end_frame):
+        marker = frame-start_frame
+    else:
+        marker = -1
+
+    return marker
+
 
 @gin.configurable
-def get_poses(poses_path, sequence, start_frame, end_frame, long_plot_start_frame):
-    """Gets the extrinsic data between the selected start/end frame and returns it as a list"""
+def get_poses(poses_path, sequence, start_frame, end_frame, long_plot_start_frame, cross_plot_start_frame):
+    """Gets the extrinsic data between the selected start/end frame and returns it as a list
+    Args:
+        poses_path (str): gin-configurable - Path referring to the poses.
+        sequence (str): gin-configurable - Sequence number corresponding to the MonoRec estimate.
+        start_frame (int): gin-configurable - Start frame of the sequence.
+        end_frame (int): gin-configurable - End frame of the sequence.
+        long_plot_start_frame (int): gin-configurable - Frame where the longitudinal section plot is located.
+        cross_plot_start_frame (int): gin-configurable - Frame where the cross section plot is located.
+    Returns:
+        extrinsic_data_list: Array containing all poses relevant for the evaluation.
+        long_plot_start_marker: Marker defining the plot position relative to the start frame.
+        cross_plot_start_marker: Marker defining the plot position relative to the start frame.
+    """
+    path = os.path.dirname(os.getcwd())
+    path = os.path.join(path, poses_path)
+
     # Get poses path
-    sequence_poses_path = os.path.join(poses_path, sequence + '.txt')
+    sequence_poses_path = os.path.join(path, sequence + '.txt')
 
     # Load sequence poses from .txt file
     poses_data = np.loadtxt(sequence_poses_path, dtype='float32')
 
-    # Select keyframe poses from given start, end
-    extrinsic_data_list = poses_data[start_frame:end_frame+1]
-
-    if (long_plot_start_frame >= start_frame) and (long_plot_start_frame <= end_frame):
-        long_plot_start_marker = long_plot_start_frame-start_frame
+    if end_frame == -1:
+        end_frame = -1
     else:
-        long_plot_start_marker = -1
+        end_frame += 1
 
-    return extrinsic_data_list, long_plot_start_marker
+    # Select keyframe poses from given start, end
+    extrinsic_data_list = poses_data[start_frame:end_frame]
 
+    # Marker for longitudinal plot position
+    long_plot_start_marker = -1
+    cross_plot_start_marker = -1
 
-def select_points_in_volume(pcd, corner_points):
-    """
-    Selects points within the volume defined by four given points.
+    if FLAGS.evaluation:
+        long_plot_start_marker = check_for_inconsistency(long_plot_start_frame, start_frame, end_frame)
+        cross_plot_start_marker = check_for_inconsistency(cross_plot_start_frame, start_frame, end_frame)
 
-    Arguments:
-    - points: numpy array of shape (N, 3) representing the 3D points of the point cloud
-    - p1, p2, p3, p4: four points defining the volume
+    return extrinsic_data_list, long_plot_start_marker, cross_plot_start_marker
 
+@gin.configurable
+def select_points_in_volume(pcd, corner_points, maximum_roadway_height=0.5, inverted_height_orientation=True):
+    """Selects points within a volume defined by corner points.
+    Args:
+        pcd (object): Open3D point cloud data.
+        corner_points (numpy.array): Array defining the corner points of the bounding box.
+        maximum_roadway_height (float): gin-configurable - Variable defining the maximum height of the roadway.
+        inverted_height_orientation (bool): gin-configurable - Variable used, if the height information of the initial
+                                            pcd is inverted (as in the standard configuration of MonoRec).
     Returns:
-    - selected_points: numpy array of shape (M, 3) containing the selected points within the volume
+        selected_points: Numpy array containing the extracted roadway points.
+        point_cloud_crop: Open3D point cloud data containing the full bounding box without maximum_roadway_height.
     """
+    # Construct bounding box
+    bounding_box_corner_points = corner_points.astype("float64")
+    bounding_box_corner_points = o3d.utility.Vector3dVector(bounding_box_corner_points)
+    oriented_bounding_box = o3d.geometry.OrientedBoundingBox.create_from_points(bounding_box_corner_points)
 
-    bounding_box = corner_points.astype("float64")
-
-    points = o3d.utility.Vector3dVector(bounding_box)
-    oriented_bounding_box = o3d.geometry.OrientedBoundingBox.create_from_points(points)
+    # Crop pcd using bounding box
     point_cloud_crop = pcd.crop(oriented_bounding_box)
 
     selected_points = np.asarray(point_cloud_crop.points)
 
-    # Delete points above streets surface
-    # Get min/max height values for selected scene
-    #min_y = min(selected_points[:, 1])
-    #max_y = min_y + 5
-
+    # Delete points above roadway (e.g. trees, ...)
+    # Get min/max height values for selected scene and threshold
     if not len(selected_points) == 0:
-        max_y = max(selected_points[:, 1])
-        min_y = max_y - 1
+        # The standard configuration of MonoRec outputs the 3D model upside down e.g. roadway higher than trees
+        # If this is the case, the height is inverted leading to inverted_height_orientation = True
+        # If not, inverted_height_orientation = False
+        if inverted_height_orientation:
+            max_y = max(selected_points[:, 1])
+            min_y = max_y - maximum_roadway_height
+        else:
+            min_y = min(selected_points[:, 1])
+            max_y = min_y + maximum_roadway_height
 
         selected_points = selected_points[
             (selected_points[:, 1] >= min_y) &
             (selected_points[:, 1] <= max_y)
         ]
 
-    oriented_bounding_box.color = [1, 0, 0]
-
-    return selected_points, oriented_bounding_box, point_cloud_crop
+    return selected_points, point_cloud_crop
 
 
 def paint_pcd_height(extracted_road_pcd, corner_points):
+    """NOT USED and NOT STABLE: Is able to colorize single roadway extraction steps based on their height.
+    Args:
+        extracted_road_pcd (object): Open3D point cloud data.
+        corner_points (numpy.array): Array describing the bounding box.
+    Returns:
+        colors: Color array.
+        pcd_cropped_inv: Open3D point cloud data.
+    """
+    # Crop point cloud using bounding box
     bounding_box = corner_points.astype("float64")
-
     points = o3d.utility.Vector3dVector(bounding_box)
     oriented_bounding_box = o3d.geometry.OrientedBoundingBox.create_from_points(points)
     point_cloud_crop = extracted_road_pcd.crop(oriented_bounding_box)
 
-    #Delete already used points
+    # Delete already used points
     dists = np.asarray(extracted_road_pcd.compute_point_cloud_distance(point_cloud_crop))
     indices = np.where(dists > 0.00001)[0]
     pcd_cropped_inv = extracted_road_pcd.select_by_index(indices)
 
+    # Colorize the selected section based on the height
     selected_points = np.asarray(point_cloud_crop.points)
-
     mean_height = np.mean(selected_points[:, 1])
-
     min_height = np.min(selected_points[:, 1])
     max_height = np.max(selected_points[:, 1])
-    #min_height = mean_height - 0.5
-    #max_height = mean_height + 0.5
-
     normalized_height = (selected_points[:, 1] - min_height) / (max_height - min_height)
     cmap = plt.get_cmap('jet')
     colors = cmap(normalized_height)
-
     colors = colors[:, 0:3]
 
     return colors, pcd_cropped_inv
 
 
 def decompose_extrinsic_matrix(extrinsic_matrix):
-
+    """Decompose extrinsic matrix into rotation matrix and translation vector.
+    Args:
+        extrinsic_matrix (numpy.array): Extrinsic matrix
+    Returns:
+        rotation_matrix: Rotation matrix
+        translation_matrix: Translation vector
+    """
     extrinsic_matrix = extrinsic_matrix.reshape(3, 4)
-
-    # Extract the rotation matrix and translation vector from the extrinsic parameters
     rotation_matrix = extrinsic_matrix[:, :3]
     translation_vector = extrinsic_matrix[:, 3]
 
     return rotation_matrix, translation_vector
 
 
-def transform_points_to_world_coords(extrinsic_matrix, roi_param_r=3, roi_param_l=3, eval_dist_rcs=0.45,
-                                     eval_dist_lrp=17, eval_pos_lrp=0):
-    """
-    Transform points from camera coordinates to world coordinates using extrinsic parameters.
-
+def transform_points_to_world_coords(points, extrinsic_matrix):
+    """Transform points from camera coordinates to world coordinates using extrinsic parameters.
     Args:
-    - points: numpy array of shape (2, 3) representing the points in camera coordinates
-    - extrinsic_params: numpy array of shape (3, 4) representing the extrinsic parameters
-
+        points (numpy.array): Array of points constructed in camera coordinates.
+        extrinsic_matrix (numpy.array): Extrinsic matrix
     Returns:
-    - transformed_points: numpy array of shape (2, 3) containing the points in world coordinates
-
-        points = np.array([[roi_param, 5, 5.2]
-                       [roi_param, -5, 5.2],
-                       [-roi_param, 5, 5.2],
-                       [-roi_param, -5, 5.2],
-                       [0, 0, 0],
-                       [2, 0, 0],
-                       [-2, 0, 0],
-                       [roi_param, 5, 5.3],
-                       [roi_param, -5, 5.3],
-                       [-roi_param, 5, 5.3],
-                       [-roi_param, -5, 5.3]
-                       ])
-
+        Transformed points (world coordinates)
     """
-
     rotation_matrix, translation_vector = decompose_extrinsic_matrix(extrinsic_matrix)
-
-    points = np.array([[roi_param_r, 5, 0],
-                       [roi_param_r, -5, 0],
-                       [-roi_param_l, 5, 0],
-                       [-roi_param_l, -5, 0],
-
-                       [0, 0, 0],
-                       [2, 0, 0],
-                       [-2, 0, 0],
-
-                       [roi_param_r, 5, eval_dist_rcs],
-                       [roi_param_r, -5, eval_dist_rcs],
-                       [-roi_param_l, 5, eval_dist_rcs],
-                       [-roi_param_l, -5, eval_dist_rcs],
-
-                       [roi_param_r, 5, eval_dist_rcs+0.10],
-                       [roi_param_r, -5, eval_dist_rcs+0.10],
-                       [-roi_param_l, 5, eval_dist_rcs+0.10],
-                       [-roi_param_l, -5, eval_dist_rcs+0.10],
-
-                       [eval_pos_lrp, 5, 0.3],
-                       [eval_pos_lrp, -5, 0.3],
-                       [eval_pos_lrp+0.1, 5, 0.3],
-                       [eval_pos_lrp+0.1, -5, 0.3],
-
-                       [eval_pos_lrp, 5, eval_dist_lrp],
-                       [eval_pos_lrp, -5, eval_dist_lrp],
-                       [eval_pos_lrp+0.1, 5, eval_dist_lrp],
-                       [eval_pos_lrp+0.1, -5, eval_dist_lrp]
-                       ])
 
     # Transform points to world coordinates
     transformed_points = np.dot(rotation_matrix, points.T) + translation_vector.reshape(-1, 1)
 
     return transformed_points.T
 
-"""
-def extract_road_section(point_cloud, pose_1, pose_2):
 
-    p1_rotation_matrix, p1_translation_vector = decompose_extrinsic_matrix(pose_1)
-    p2_rotation_matrix, p2_translation_vector = decompose_extrinsic_matrix(pose_2)
+@gin.configurable
+def construct_bounding_box_corners(extrinsic_matrix, roi_bb_width_r=3, roi_bb_width_l=3, roi_bb_dist=0,
+                                   eval_cs_plot_pos=0.45, eval_ls_plot_depth=17, eval_ls_plot_pos=0,
+                                   eval_cs_plot_depth=0.1, eval_ls_plot_width=0.1):
+    """Construct bounding box corners in camera coordinate system and transform to world coordinates.
+    Args:
+        extrinsic_matrix (numpy.array): Extrinsic matrix
+        roi_bb_width_r (float): gin-configurable - Width of the bounding box to the right side of the vehicle
+        roi_bb_width_l (float): gin-configurable - Width of the bounding box to the left side of the vehicle
+        roi_bb_dist (float): gin-configurable - Distance in the X-Z-plane between the bounding box and the vehicle
+        eval_cs_plot_pos (float): gin-configurable - Position from the selected cross section plot frame
+        eval_ls_plot_depth (float): gin-configurable - Depth for the longitudinal section plot
+        eval_ls_plot_pos (float): gin-configurable - Position for the selected longitudinal plot frame position
+        eval_cs_plot_depth (float): gin-configurable - Depth for the cross section plot
+        eval_ls_plot_width (float): gin-configurable - Width for the longitudinal section plot
+    Returns:
+        points: Numpy array containing all points necessary for evaluation or normal functionality
+    """
+    if FLAGS.evaluation:
+        # Points necessary for evaluation (construction of road cross section and longitudinal plots)
+        points = np.array([[roi_bb_width_r, 5, roi_bb_dist],
+                           [roi_bb_width_r, -5, roi_bb_dist],
+                           [-roi_bb_width_l, 5, roi_bb_dist],
+                           [-roi_bb_width_l, -5, roi_bb_dist],
+                           # Evaluation points for...
+                           # ... later rotation
+                           [0, 0, 0],
+                           [2, 0, 0],
+                           [-2, 0, 0],
+                           # ... road cross section plot
+                           [roi_bb_width_r, 5, eval_cs_plot_pos],
+                           [roi_bb_width_r, -5, eval_cs_plot_pos],
+                           [-roi_bb_width_l, 5, eval_cs_plot_pos],
+                           [-roi_bb_width_l, -5, eval_cs_plot_pos],
+                           [roi_bb_width_r, 5, eval_cs_plot_pos + eval_cs_plot_depth],
+                           [roi_bb_width_r, -5, eval_cs_plot_pos + eval_cs_plot_depth],
+                           [-roi_bb_width_l, 5, eval_cs_plot_pos + eval_cs_plot_depth],
+                           [-roi_bb_width_l, -5, eval_cs_plot_pos + eval_cs_plot_depth],
+                           # ... road longitudinal section plot
+                           [eval_ls_plot_pos, 5, 0.3],
+                           [eval_ls_plot_pos, -5, 0.3],
+                           [eval_ls_plot_pos + eval_ls_plot_width, 5, 0.3],
+                           [eval_ls_plot_pos + eval_ls_plot_width, -5, 0.3],
+                           [eval_ls_plot_pos, 5, eval_ls_plot_depth],
+                           [eval_ls_plot_pos, -5, eval_ls_plot_depth],
+                           [eval_ls_plot_pos + eval_ls_plot_width, 5, eval_ls_plot_depth],
+                           [eval_ls_plot_pos + eval_ls_plot_width, -5, eval_ls_plot_depth]
+                           ])
 
-    rotated_point_cloud = point_cloud.rotate(np.transpose(p1_rotation_matrix), center=p1_translation_vector)
+    else:
+        # Point necessary for normal functionality
+        points = np.array([[roi_bb_width_r, 5, roi_bb_dist],
+                           [roi_bb_width_r, -5, roi_bb_dist],
+                           [-roi_bb_width_l, 5, roi_bb_dist],
+                           [-roi_bb_width_l, -5, roi_bb_dist]])
 
-    rotated_p2_rotation_matrix = np.dot(np.transpose(p1_rotation_matrix), p2_rotation_matrix)
-    translated_p2_translation_vector = p2_translation_vector - p1_translation_vector
-    rotated_p2_translation_vector = np.dot(np.transpose(p1_rotation_matrix), translated_p2_translation_vector)
-    rotated_p2_translation_vector += p1_translation_vector
+    points = transform_points_to_world_coords(points, extrinsic_matrix)
 
-    rotated_p1_rotation_matrix = np.dot(np.transpose(p1_rotation_matrix), p1_rotation_matrix)
-    rotated_p1_translation_vector = p1_translation_vector
-
-    rotated_pose1 = np.eye(3, 4)
-    rotated_pose1[:, :3] = rotated_p1_rotation_matrix
-    rotated_pose1[:, 3] = rotated_p1_translation_vector
-
-    rotated_pose2 = np.eye(3, 4)
-    rotated_pose2[:, :3] = rotated_p2_rotation_matrix
-    rotated_pose2[:, 3] = rotated_p2_translation_vector
-
-    point_1_2 = transform_points_to_world_coords(rotated_pose1)
-    point_3_4 = transform_points_to_world_coords(rotated_pose2)
-
-    # Convert open3D point cloud to numpy array
-    pcd_array = np.asarray(point_cloud.points)
-
-    rotated_selection = select_points_in_volume(pcd_array, point_1_2[0], point_1_2[1], point_3_4[0], point_3_4[1])
-
-    selection_pcd = o3d.geometry.PointCloud()
-    selection_pcd.points = o3d.utility.Vector3dVector(rotated_selection)
-
-    selection_pcd.rotate(p1_rotation_matrix, center=p1_translation_vector)
-
-    return np.asarray(selection_pcd.points)
-"""
+    return points
 
 
-def road_cross_section_plot(in_selection, out_selection, gt_selection, point_1234, pose_1):
+def get_and_rotate_pcd_for_plot(pcd, point_1234, rotation_matrix, translation_vector, plot_type,
+                                vis_selection=False):
+    """Get data and preprocess pcd for plots - part 1.
+    Args:
+        pcd (object): Open3D point cloud data.
+        point_1234 (numpy.array): Array containing the point defining the bounding boxes for the plots.
+        rotation_matrix (numpy.array): Camera extrinsic rotation matrix
+        translation_vector (numpy.array): Camera extrinsic translation vector
+        plot_type (str): Variable defining which plot to do - road longitudinal or road cross section
+        vis_selection (bool): Visualize the points used for the plots as a 3D object
+    Returns:
+        selection: Rotated point selection used for the plot
+    """
+    if plot_type == 'long':
+        p1 = point_1234[15:19]
+        p2 = point_1234[19:23]
+    elif plot_type == 'cross':
+        p1 = point_1234[7:11]
+        p2 = point_1234[11:15]
+    else:
+        print('Unknown plot type! Automatically switching to cross section plot!')
+        p1 = point_1234[7:11]
+        p2 = point_1234[11:15]
 
-    #input_selection = o3d.geometry.PointCloud()
-    #input_selection.points = o3d.utility.Vector3dVector(in_selection)
-    _, _, input_selection = select_points_in_volume(in_selection, np.append(point_1234[7:11], point_1234[11:15], axis=0))
+    # Select data using bounding box constructed earlier
+    _, selection = select_points_in_volume(pcd, np.append(p1, p2, axis=0))
 
-    output_selection = o3d.geometry.PointCloud()
-    output_selection.points = o3d.utility.Vector3dVector(out_selection)
-    _, _, output_selection = select_points_in_volume(output_selection, np.append(point_1234[7:11], point_1234[11:15], axis=0))
+    if vis_selection:
+        o3d.visualization.draw_geometries([selection])
 
-    _, _, gt_selection = select_points_in_volume(gt_selection, np.append(point_1234[7:11], point_1234[11:15], axis=0))
+    # Rotate selection, so that the world coordinate axis correspond to camera coordinate axis
+    selection = selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
 
-    #o3d.visualization.draw_geometries([output_selection])
+    return selection
 
+
+def rotate_and_preprocess_pcd_for_plot(pcd, rotation_angle, center, plot_type, inverted_height_orientation=True):
+    """Preprocess pcd for plots - part 2.
+    Args:
+        pcd (object): Open3D point cloud data.
+        rotation_angle (float): Angle used to rotate the plot points for visualization purposes.
+        center (tuple): Rotation center.
+        plot_type (str): Variable defining which plot to do - road longitudinal or road cross section.
+        inverted_height_orientation (bool): Variable used, if the height information of the initial pcd is inverted
+                                            (as in the standard configuration of MonoRec).
+    Returns:
+        y_coordinates: Extracted y coordinates form the point selection
+        x_or_z_coordinates: Corresponding x or z coordinate from the point selection
+    """
+    rotation_angle_x = 0
+    rotation_angle_z = 0
+
+    if plot_type == 'long':
+        rotation_angle_x = rotation_angle
+        axis = 2
+    elif plot_type == 'cross':
+        rotation_angle_z = rotation_angle
+        axis = 0
+    else:
+        print('Unknown plot type! Automatically switching to cross section plot!')
+        rotation_angle_z = rotation_angle
+        axis = 0
+
+    # Rotate selection
+    rotated_pcd = rotate_pcd(pcd, [rotation_angle_x, 0, rotation_angle_z], center=center)
+
+    point_array = np.asarray(rotated_pcd.points)
+
+    if inverted_height_orientation:
+        sign = -1
+    else:
+        sign = 1
+
+    # Extract Y and X/Z coordinates from the selected coordinates
+    y_coordinates = sign * point_array[:, 1]
+    x_or_z_coordinates = point_array[:, axis]
+
+    return y_coordinates, x_or_z_coordinates
+
+
+def shift_coordinates(y, x_or_z, mean_y, min_x_or_z):
+    """Shift input coordinates using mean and min values - for visualization purposes.
+    Args:
+        y (numpy.array): Y coordinate.
+        x_or_z (numpy.array): Corresponding X or Z coordinates.
+        mean_y (float): Mean of the Y coordinates.
+        min_x_or_z (float): Minimum value of the X or Z coordinates.
+    Returns:
+        y: Mean shifted Y coordinate.
+        x_or_z: Minimum shifted X or Z coordinate.
+    """
+    y -= mean_y
+    x_or_z -= min_x_or_z
+
+    return y, x_or_z
+
+
+def preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, plot_type, pcd_gt=False):
+    """Preprocess pcd for plots.
+    Args:
+        pcd (object): Open3D point cloud data (=MonoRec output).
+        pcd_post_processed (object): Open3D point cloud data (=Post processing output).
+        point_1234 (numpy.array): Array containing the point defining the bounding boxes for the plots.
+        pose_1 (numpy.array): Extrinsic camera parameters used to improve the plot visualization.
+        rotation_angle (numpy.array): Angle used to rotate the plot points for visualization purposes.
+        plot_type (str): Variable defining which plot to do - road longitudinal or road cross section.
+        pcd_gt (bool): Placeholder - whether to use pcd ground truth.
+    Returns:
+        input_y_coordinate: MonoRec output (=post processing input) - Y coordinates
+        input_x_or_z_coordinate: MonoRec output (=post processing input) - X or Z coordinates
+        output_y_coordinate: Post processing output - Y coordinates
+        output_x_or_z_coordinate: Post processing output - X or Z coordinates
+    """
     rotation_matrix, translation_vector = decompose_extrinsic_matrix(pose_1)
 
-    input_selection = input_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
-    output_selection = output_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
-    gt_selection = gt_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
+    # Get selection and rotate, so that the world coordinate axis correspond to camera coordinate axis
+    input_selection = get_and_rotate_pcd_for_plot(pcd, point_1234, rotation_matrix, translation_vector,
+                                                  plot_type)
+    output_selection = get_and_rotate_pcd_for_plot(pcd_post_processed, point_1234, rotation_matrix,
+                                                   translation_vector, plot_type)
+    #gt_selection = ....
 
-
+    # Rotate selection if rotation angle is given from gin-config
+    # Calculate center for rotation
     points = np.asarray(output_selection.points)
-    # Compute translation vector to move center of rotation to origin
+
+    if len(points) == 0:
+        return [], [], [], []
+
     center = np.mean(points, axis=0)
 
-    rotation_angle = 0.1
+    input_y_coordinates, input_x_or_z_coordinates = rotate_and_preprocess_pcd_for_plot(input_selection, rotation_angle,
+                                                                                     center, plot_type)
+    output_y_coordinates, output_x_or_z_coordinates = rotate_and_preprocess_pcd_for_plot(output_selection, rotation_angle,
+                                                                                       center, plot_type)
+    #gt_y_coordinate, gt_x_or_z_coordinate = ...
 
-    # Rotate pointcloud so that start and end are on same height
-    output_selection = rotate_pcd(output_selection, [0, 0, rotation_angle], center=center)
-    input_selection = rotate_pcd(input_selection, [0, 0, rotation_angle], center=center)
-    gt_selection = rotate_pcd(gt_selection, [0, 0, rotation_angle], center=center)
+    # Normalize y coordinate (mean = 0) and shift x or z coordinate (min = 0)
+    mean_y = np.mean(output_y_coordinates)
+    min_x_or_z = np.min(output_x_or_z_coordinates)
 
+    input_y_coordinate, input_x_or_z_coordinate = shift_coordinates(input_y_coordinates, input_x_or_z_coordinates,
+                                                                    mean_y, min_x_or_z)
+    #gt_y_coordinate, gt_x_or_z_coordinate = ...
+    output_y_coordinate, output_x_or_z_coordinate = shift_coordinates(output_y_coordinates, output_x_or_z_coordinates,
+                                                                      mean_y, min_x_or_z)
 
-    old_pc = np.asarray(input_selection.points)
-    new_pc = np.array(output_selection.points)
-    gt_pc = np.array(gt_selection.points)
-
-    # Extract Y and Z coordinates from the selected coordinates
-    y_values_o = -old_pc[:, 1]
-    z_values_o = old_pc[:, 0]
-
-    y_values_n = -new_pc[:, 1]
-    z_values_n = new_pc[:, 0]
-
-    y_values_gt = -gt_pc[:, 1]
-    z_values_gt = gt_pc[:, 0]
-
-    y_values_o -= np.abs(np.mean(y_values_n))
-    z_values_o += np.abs(np.min(z_values_n))
-    y_values_gt -= np.abs(np.mean(y_values_n))
-    z_values_gt += np.abs(np.min(z_values_n))
-    y_values_n -= np.abs(np.mean(y_values_n))
-    z_values_n += np.abs(np.min(z_values_n))
-
-    # Set the figure size
-    fig, ax = plt.subplots(figsize=(11, 4))  # Adjust the width and height as desired
-
-    ax.set_axisbelow(True)
-
-    # Plot Y against Z
-    ax.scatter(z_values_o, y_values_o, color='silver', label='MonoRec')
-    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
-    ax.scatter(z_values_n, y_values_n, color='blue', label='post processing')
-
-    # Set labels for the axes
-    ax.set_xlabel('road width [meters]', fontsize=16)
-    ax.set_ylabel('road height [meters]', fontsize=16)
-
-    ax.tick_params(axis='both', which='major', labelsize=16)
-
-    # Set title for the plot
-    #ax.set_title('road cross section', fontsize=16)
-
-    ax.legend(fontsize=16, loc='lower right')
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
-
-    plt.grid()
-    plt.ylim([-0.2, 0.2])
-    #plt.xlim([-0.5, 7.8])
-    plt.tight_layout()
-    plt.savefig('plot_05_2742-2743_plot_2', dpi=300)
-    plt.show()
-
-
-def road_longitudinal_profile_plot(pcd, pcd_gt, pcd_reconstruction, point_1234, pose_1):
-
-    _, _, input_selection = select_points_in_volume(pcd, np.append(point_1234[15:19], point_1234[19:23], axis=0))
-
-    _, _, output_selection = select_points_in_volume(pcd_reconstruction, np.append(point_1234[15:19], point_1234[19:23], axis=0))
-
-    _, _, gt_selection = select_points_in_volume(pcd_gt, np.append(point_1234[15:19], point_1234[19:23], axis=0))
-
-    o3d.visualization.draw_geometries([output_selection])
-
-    rotation_matrix, translation_vector = decompose_extrinsic_matrix(pose_1)
-
-    input_selection = input_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
-    output_selection = output_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
-    gt_selection = gt_selection.rotate(np.transpose(rotation_matrix), center=translation_vector)
-
-
-    ##### Rotate pointcloud so that start and end are on same height
-    # Computation
-    points = np.asarray(output_selection.points)
-    # Find indices of points with minimum and maximum X values
-    min_x_idx = np.argmin(points[:, 2])
-    max_x_idx = np.argmax(points[:, 2])
-    # Calculate desired Y value based on minimum and maximum X values
-    desired_y = (points[min_x_idx, 1] + points[max_x_idx, 1]) / 2.0
-    # Compute translation vector to move center of rotation to origin
-    center = np.mean(points, axis=0)
-    # Compute rotation matrix to align desired Y value with Y axis
-    rotation_angle = np.arctan2(desired_y, points[min_x_idx, 1])
-
-    print('Rotation angle from long. plot: ', rotation_angle)
-
-    rotation_angle = -0.97
-
-    # Rotate pointcloud so that start and end are on same height
-    output_selection = rotate_pcd(output_selection, [rotation_angle, 0, 0], center=center)
-    input_selection = rotate_pcd(input_selection, [rotation_angle, 0, 0], center=center)
-    gt_selection = rotate_pcd(gt_selection, [rotation_angle, 0, 0], center=center)
-
-    old_pc = np.asarray(input_selection.points)
-    new_pc = np.array(output_selection.points)
-    gt_pc = np.array(gt_selection.points)
-
-    # Extract Y and Z coordinates from the selected coordinates
-    y_values_o = -old_pc[:, 1]
-    z_values_o = old_pc[:, 2]
-
-    y_values_n = -new_pc[:, 1]
-    z_values_n = new_pc[:, 2]
-
-    y_values_gt = -gt_pc[:, 1]
-    z_values_gt = gt_pc[:, 2]
-
-    y_values_o -= np.abs(np.mean(y_values_n))
-    z_values_o -= np.abs(np.min(z_values_n))
-    y_values_gt -= np.abs(np.mean(y_values_n))
-    z_values_gt -= np.abs(np.min(z_values_n))
-    y_values_n -= np.abs(np.mean(y_values_n))
-    z_values_n -= np.abs(np.min(z_values_n))
-
-    # Set the figure size
-    fig, ax = plt.subplots(figsize=(11, 4))  # Adjust the width and height as desired
-
-    ax.set_axisbelow(True)
-
-    # Plot Y against Z
-    ax.scatter(z_values_o, y_values_o, color='silver', label='MonoRec')
-    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
-    ax.scatter(z_values_n, y_values_n, color='blue', label='post processing')
-
-    # Set labels for the axes
-    ax.set_xlabel('road depth [meters]', fontsize=16)
-    ax.set_ylabel('road height [meters]', fontsize=16)
-
-    ax.tick_params(axis='both', which='major', labelsize=16)
-
-    # Set title for the plot
-    #ax.set_title('road cross section', fontsize=16)
-
-    ax.legend(fontsize=16, loc='lower right')
-
-    plt.ylim([-0.1, 0.1])
-    #plt.xlim([0, 9])
-    plt.tight_layout()
-    plt.grid()
-    #plt.savefig('plot_long_mid_plot_3.png', dpi=300)
-    plt.show()
-
+    return input_y_coordinate, input_x_or_z_coordinate, output_y_coordinate, output_x_or_z_coordinate
 
 
 @gin.configurable
-def extract_road(point_cloud, point_cloud_gt, post_processing_mode):
+def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim, pcd_gt=False):
+    """Road cross section plot.
+    Args:
+        pcd (object): Open3D point cloud data (=MonoRec output)
+        pcd_post_processed (object): Open3D point cloud data (=Post processing output)
+        point_1234 (numpy.array): Array containing the point defining the bounding boxes for the plots.
+        pose_1 (numpy.array): Extrinsic camera parameters used to improve the plot visualization.
+        rotation_angle (list): gin-configurable - Angle used to rotate the plot points for visualization purposes.
+        y_axis_lim (list): gin-configurable - Plot y-axis limit
+        pcd_gt (object): Placeholder - whether to use pcd ground truth.
+    """
+    in_y_coord, in_x_coord, out_y_coord, out_x_coord = preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234,
+                                                                               pose_1, rotation_angle, plot_type='cross')
 
-    poses_list, long_plot_start_marker = get_poses()
+    if len(out_y_coord) == 0:
+        print('No points available for road cross section plot!')
+        print('Plot is skipped!')
+        return
 
-    extracted_road_points = []
+    # Configure figure
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.set_axisbelow(True)
 
+    # Plot Y against X
+    ax.scatter(in_x_coord, in_y_coord, color='silver', label='MonoRec')
+    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
+    ax.scatter(out_x_coord, out_y_coord, color='blue', label='post processing')
+
+    # Configure axes
+    ax.set_xlabel('road width [meters]', fontsize=16)
+    ax.set_ylabel('road height [meters]', fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=16)
+
+    # Set title, legend, ...
+    ax.set_title('road cross section plot', fontsize=16)
+    ax.legend(fontsize=16, loc='lower right')
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    plt.grid()
+    plt.ylim(y_axis_lim)
+    plt.tight_layout()
+    #plt.savefig('plot_cross.png', dpi=300)
+    plt.show()
+
+@gin.configurable
+def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim, pcd_gt=False):
+    """Road longitudinal section plot => Y-Z-Plot (Height-Depth-Plot).
+        Args:
+            pcd (object): Open3D point cloud data (=MonoRec output)
+            pcd_post_processed (object): Open3D point cloud data (=Post processing output)
+            point_1234 (numpy.array): Array containing the point defining the bounding boxes for the plots.
+            pose_1 (numpy.array): Extrinsic camera parameters used to improve the plot visualization.
+            rotation_angle (list): gin-configurable - Angle used to rotate the plot points for visualization purposes.
+            y_axis_lim (list): gin-configurable - Plot y-axis limit
+            pcd_gt (object): Placeholder - whether to use pcd ground truth.
+    """
+    in_y_coord, in_z_coord, out_y_coord, out_z_coord = preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234,
+                                                                               pose_1, rotation_angle, plot_type='long')
+
+    if len(out_y_coord) == 0:
+        print('No points available for longitudinal cross section plot!')
+        print('Plot is skipped!')
+        return
+
+    # Configure figure
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.set_axisbelow(True)
+
+    # Plot Y against Z
+    ax.scatter(in_z_coord, in_y_coord, color='silver', label='MonoRec')
+    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
+    ax.scatter(out_z_coord, out_y_coord, color='blue', label='post processing')
+
+    # Configure axes
+    ax.set_xlabel('road depth [meters]', fontsize=16)
+    ax.set_ylabel('road height [meters]', fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=16)
+
+    # Set title, legend, ...
+    ax.set_title('road longitudinal section plot', fontsize=16)
+    ax.legend(fontsize=16, loc='lower right')
+    plt.ylim(y_axis_lim)
+    plt.tight_layout()
+    plt.grid()
+    #plt.savefig('plot_long.png', dpi=300)
+    plt.show()
+
+
+@gin.configurable
+def extract_road(pcd, post_processing_mode, pcd_gt=False):
+    """Roadway extraction step.
+    Args:
+        pcd (object): Open3D point cloud data.
+        post_processing_mode (str): gin-configurable - Mode defining if the road extraction and the denoising should be
+                                    performed alternating for each frame or sequential after the whole section.
+                                    First mode simulates the real behaviour, second mode improves the visualization for
+                                    a qualitative evaluation.
+        pcd_gt (object): Placeholder - whether to use pcd ground truth.
+    Returns:
+        pcd_post_processed: Post processed Open3D point cloud data.
+        center: Center of pcd_post_processed used for later rotation.
+    """
+    # In regular mode, set post processing mode to alternating
+    if not FLAGS.evaluation:
+        post_processing_mode = 'alternating'
+
+    # Get poses for extraction
+    poses_list, long_plot_start_marker, cross_plot_start_marker = get_poses()
+    point_array = []
+    center = False
+
+    # Runtime measurement
     start_time = time.time()
 
+    # Loop for roadway extraction; Iterating over the poses
     for i in range(len(poses_list)-1):
+
+        # Camera pose timestep t-1; Past vehicle position
         extrinsic_pose1 = poses_list[i]
+        # Camera pose timestep t; Current vehicle position
         extrinsic_pose2 = poses_list[i+1]
 
-        point_1234 = transform_points_to_world_coords(extrinsic_pose1)
-        point_5678 = transform_points_to_world_coords(extrinsic_pose2)
+        # Get all points necessary for bounding box operation
+        point_1234 = construct_bounding_box_corners(extrinsic_pose1)
+        point_5678 = construct_bounding_box_corners(extrinsic_pose2)
 
+        # Get points necessary for bounding box construction => corner points of bounding box
         corner_points = np.append(point_1234[0:4], point_5678[0:4], axis=0)
 
-        if i==0:
-            start_pose = point_1234[4]
-        if i==len(poses_list)-2:
-            end_pose = point_5678[4]
-        if i==int((len(poses_list)-1)/2):
-            middle_pose = point_1234[4]
-            middle_pose[1] = middle_pose[1] + 1.65
+        # Roadway extraction step
+        raw_selection, full_height_raw_selection = select_points_in_volume(pcd, corner_points)
 
-        if i == long_plot_start_marker:
-            saved_point_1234 = point_1234
-            saved_pose_1 = extrinsic_pose1
+        # Save necessary points for evaluation/plots
+        if FLAGS.evaluation:
+            # Do roadway extraction also for ground truth point cloud
+            #_, full_height_raw_selection_gt = select_points_in_volume(pcd_gt, corner_points)
 
-        selection, oriented_bounding_box, full_height_selection = select_points_in_volume(point_cloud, corner_points)
-        input_selection = full_height_selection
+            # Save a point in the middle of the extracted roadway (center) for later rotation
+            if i == int((len(poses_list)-1)/2):
+                center = point_1234[4]
+                center[1] = center[1] + 1.65
 
-        _, _, full_height_selection = select_points_in_volume(point_cloud_gt, corner_points)
+            # Save values for road longitudinal section plot
+            if i == long_plot_start_marker:
+                long_plot_point_1234 = point_1234
+                long_plot_pose_1 = extrinsic_pose1
 
-        gt_selection = full_height_selection
+            # Save values for road cross section plot
+            if i == cross_plot_start_marker:
+                cross_plot_point_1234 = point_1234
+                cross_plot_pose_1 = extrinsic_pose1
 
-        if len(selection) == 0:
+        # Skip roadway sections where no points could be extracted
+        if len(raw_selection) == 0:
             continue
 
         if post_processing_mode == 'alternating':
-            selection = slice_in_given_dimension(selection)
-
-            output_selection = selection
-
-            if (len(poses_list)-1) == 1:
-                # Plot road cross section, should be performed for one frame only
-                road_cross_section_plot(input_selection, output_selection, gt_selection, point_1234, extrinsic_pose1)
-
-
-        if extracted_road_points == []:
-            extracted_road_points = selection
+            point_selection = slice_in_given_dimension(raw_selection)
         else:
-            extracted_road_points = np.append(extracted_road_points, selection, axis=0)
+            point_selection = raw_selection
 
-    if post_processing_mode == 'sequential':
-        extracted_road_points = slice_in_given_dimension(extracted_road_points)
+        if point_array == []:
+            point_array = point_selection
+        else:
+            point_array = np.append(point_array, point_selection, axis=0)
 
+    # Calculate and print runtime
     end_time = time.time()
     runtime = end_time - start_time
-    print('Runtime', runtime)
+    print('Runtime:', runtime)
 
-    extracted_road_pcd = o3d.geometry.PointCloud()
-    extracted_road_pcd.points = o3d.utility.Vector3dVector(extracted_road_points)
+    if post_processing_mode == 'sequential':
+        point_array = slice_in_given_dimension(point_array)
 
-    if long_plot_start_marker != -1:
-        # Visualize longitudinal road profile plot
-        road_longitudinal_profile_plot(point_cloud, point_cloud_gt, extracted_road_pcd, saved_point_1234, saved_pose_1)
+    # Convert numpy array to pcd
+    pcd_post_processed = o3d.geometry.PointCloud()
+    pcd_post_processed.points = o3d.utility.Vector3dVector(point_array)
 
-    #o3d.visualization.draw_geometries([extracted_road_pcd, oriented_bounding_box])
+    if FLAGS.evaluation:
+        if long_plot_start_marker != -1:
+            # Visualize road longitudinal section plot
+            road_longitudinal_profile_plot(pcd, pcd_post_processed, long_plot_point_1234, long_plot_pose_1)
+        if cross_plot_start_marker != -1:
+            # Visualize road cross section plot
+            road_cross_section_plot(pcd, pcd_post_processed, cross_plot_point_1234, cross_plot_pose_1)
 
-    '''
-    extracted_road_pcd_copy = extracted_road_pcd
-    
-    for i in range(len(poses_list)-1):
-        extrinsic_pose1 = poses_list[i]
-        extrinsic_pose2 = poses_list[i+1]
-
-        point_1234 = transform_points_to_world_coords(extrinsic_pose1)
-        point_5678 = transform_points_to_world_coords(extrinsic_pose2)
-
-        corner_points = np.append(point_1234, point_5678, axis=0)
-
-        selection_road_color, extracted_road_pcd_copy = paint_pcd_height(extracted_road_pcd_copy, corner_points)
-
-        if i == 0:
-            extracted_road_color = selection_road_color
-        else:
-            extracted_road_color = np.append(extracted_road_color, selection_road_color, axis=0)
-            
-    extracted_road_pcd.colors = o3d.utility.Vector3dVector(extracted_road_color)
-    '''
-
-    return extracted_road_pcd, middle_pose
-
+    return pcd_post_processed, center
