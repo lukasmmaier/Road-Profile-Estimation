@@ -8,11 +8,11 @@ This README file gives only a short introduction into the full 3D road profile e
 ## Prototype System Architecture:
 The conceptual system should consist of 3 modules: 
 
-<strong>DVSO => MonoRec => Post Processing</strong>
+![Flow plan of the concept.](/pictures/flow_plan_concept.PNG)
 
 The implemented prototype consists of 2 modules, compensating for DVSO by using information from the dataset:
 
-<strong>MonoRec => Post Processing</strong>
+![Flow plan of the prototype.](/pictures/flow_plan_prototype.PNG)
 
 This repository only contains the Post Processing part. For evaluation and testing, the KITTI odometry dataset is used.
 
