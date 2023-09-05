@@ -1,5 +1,9 @@
-# Road Profile Estimation
-This README file gives only a short introduction into the full road profile estimation prototype of the corresponding research project.
+# 3D Road Profile Estimation based on Monocular Vision
+This GitHub repository is part of my research project at the IAS (University of Stuttgart) for my M.Sc. in Electromobility. It investigates whether monocular vision can be used for real-time 3D estimation of road profiles. Since the road profile significantly affects passenger comfort and vehicle dynamics, its estimation is crucial for active suspension systems allowing to improve both aspects. The developed concept combines a Visual Odometry approach (i.e. [DVSO](https://arxiv.org/abs/1807.02570)) with a dense reconstruction method (i.e. [MonoRec](https://arxiv.org/abs/2011.11814)), followed by a post processing module. The evaluation showed that the upcoming road profile can be estimated using monocular vision. An example is given in the following image.
+
+![Example. Prototype Input - Prototype Output.](/pictures/example.png)
+
+This README file gives only a short introduction into the full 3D road profile estimation prototype. For more information, the corresponding thesis describes the concept and the prototype in detail.
 
 ## Prototype System Architecture:
 The conceptual system should consist of 3 modules: 
