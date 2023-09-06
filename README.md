@@ -17,14 +17,17 @@ The implemented prototype consists of 2 modules, compensating for DVSO by using 
 This repository only contains the Post Processing part. For evaluation and testing, the KITTI odometry dataset is used.
 
 ### DVSO:
+*ECCV 2018: Deep Virtual Stereo Odometry: Leveraging Deep Depth Prediction for Monocular Direct Sparse Odometry*
 - Paper: https://arxiv.org/abs/1807.02570
 - Unofficial GitHub Repository: https://github.com/SenZHANG-GitHub/DVSO
 
 ### MonoRec:
+*CVPR 2021: MonoRec: Semi-Supervised Dense Reconstruction in Dynamic Environments from a Single Moving Camera*
 - Paper: https://arxiv.org/abs/2011.11814
 - Official GitHub Repository: https://github.com/Brummi/MonoRec
 
 ### KITTI Odometry Dataset:
+*CVPR 2012: Are we ready for Autonomous Driving? The KITTI Vision Benchmark Suite*
 - Paper: https://ieeexplore.ieee.org/document/6248074
 - Website/Download: https://www.cvlibs.net/datasets/kitti/eval_odometry.php
 
