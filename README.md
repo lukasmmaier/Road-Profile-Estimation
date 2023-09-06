@@ -5,7 +5,7 @@ This GitHub repository is part of my research project at the IAS (University of 
 
 This README file gives only a short introduction into the full 3D road profile estimation prototype. For more information, the corresponding thesis describes the concept and the prototype in detail.
 
-## Prototype System Architecture:
+## System Architecture:
 The conceptual system should consist of 3 modules: 
 
 ![Flow plan of the concept.](/pictures/flow_plan_concept.PNG)
