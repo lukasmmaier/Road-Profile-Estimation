@@ -4,6 +4,7 @@ from absl import app, flags
 import open3d as o3d
 
 import extract_road
+import compare_final_pcd
 from preprocessing.evaluation_processing import process_for_evaluation
 from utils_and_tools.o3d_tools import rotate_pcd, remove_points_within_radius
 
@@ -16,23 +17,38 @@ def main(argv):
     # Setup gin-config
     gin.parse_config_files_and_bindings([os.getcwd() + '/configs/config.gin'], [])
 
-    pcd_filename, pcd_gt_filename = load_configuration()
+    pcd_filename, pcd_gt_filename, use_gt, pcd_sec_est_filename, use_sec_est = load_configuration()
 
     # Load point cloud from MonoRec
     pcd = load_point_cloud(filename=pcd_filename)
 
-    # Load ground truth (GT) point cloud
-    #pcd_gt = load_point_cloud(filename=pcd_gt_filename)
+    if use_gt:
+        pcd_gt = load_point_cloud(filename=pcd_gt_filename)
+        gt_road_profile_reconstruction, _ = extract_road.extract_road(pcd_gt, do_plots=False)
+    else:
+        gt_road_profile_reconstruction = False
+
+    if use_sec_est:
+        pcd_sec_est = load_point_cloud(filename=pcd_sec_est_filename)
+        sec_est_road_profile_reconstruction, _ = extract_road.extract_road(pcd_sec_est, do_plots=False)
+    else:
+        sec_est_road_profile_reconstruction = False
 
     # Post processing module => Roadway extraction + Denonoising
-    road_profile_reconstruction, center = extract_road.extract_road(pcd)
+    road_profile_reconstruction, center = extract_road.extract_road(pcd, pcd_gt=gt_road_profile_reconstruction,
+                                                                    pcd_sec_est=sec_est_road_profile_reconstruction)
 
     # Rotate estimates 180° - MonoRec outputs estimates upside down
-    road_profile_reconstruction = rotate_pcd(road_profile_reconstruction, [180, 0, 0])
-    pcd = rotate_pcd(pcd, [180, 0, 0])
+    road_profile_reconstruction = rotate_pcd(road_profile_reconstruction, [180, 0, 0], center)
+    pcd = rotate_pcd(pcd, [180, 0, 0], center)
+
+
+    gt_road_profile_reconstruction = rotate_pcd(gt_road_profile_reconstruction, [180, 0, 0], center)
+    sec_est_road_profile_reconstruction = rotate_pcd(sec_est_road_profile_reconstruction, [180, 0, 0], center)
+    #compare_final_pcd.compare_pcd(road_profile_reconstruction, sec_est_road_profile_reconstruction, gt_road_profile_reconstruction)
 
     # Visualize estimate
-    o3d.visualization.draw_geometries([road_profile_reconstruction])
+    #o3d.visualization.draw_geometries([road_profile_reconstruction])
 
     # Further visualizations for evaluation
     if FLAGS.evaluation:
@@ -44,12 +60,14 @@ def main(argv):
                                                                   [angle_x, 0, angle_z], center)
 
         # Remove road profile points from MonoRec pcd and input post processing pcd for visualization
+        _, ind = pcd.remove_radius_outlier(nb_points=15, radius=0.1)
+        pcd = pcd.select_by_index(ind)
         pcd = remove_points_within_radius(pcd, road_profile_reconstruction)
         o3d.visualization.draw_geometries([pcd, road_profile_reconstruction])
 
 
 @gin.configurable
-def load_configuration(pcd_filename, pcd_gt_filename, use_gt):
+def load_configuration(pcd_filename, pcd_gt_filename, use_gt, sec_ets_filename, use_sec_est):
     """Load variables from gin-config.
     Args:
         pcd_filename (str): gin-configurable - Filename for input point cloud (= MonoRec output as .ply).
@@ -64,7 +82,10 @@ def load_configuration(pcd_filename, pcd_gt_filename, use_gt):
     if not use_gt:
         pcd_gt_filename = False
 
-    return pcd_filename, pcd_gt_filename
+    if not use_sec_est:
+        pcd_gt_filename = False
+
+    return pcd_filename, pcd_gt_filename, use_gt, sec_ets_filename, use_sec_est
 
 
 @gin.configurable

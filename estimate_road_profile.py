@@ -119,7 +119,7 @@ def reconstruct_mesh(est_road_profile, mesh_method, radii, radius, max_nn, do_vi
 
 @gin.configurable
 def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions, estimation_variant, plot_histogram,
-                             plot_histogram_first_dim_position):
+                             plot_histogram_first_dim_position, pcd_gt=False):
     """Denoising module.
     Args:
         pcd (object): Open3D point cloud data (=Roadway extraction module output)
@@ -134,6 +134,7 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
     """
     # Initialize lists
     est_road_profile, histogram_points = [], []
+    error = []
 
     # Get dimensions to slice from list
     first_dim = slice_dimensions[0]
@@ -159,6 +160,9 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
     # Calculate the position from where the histogram should be calculated
     histogram_position = int(num_iterations_first_dim * plot_histogram_first_dim_position)
 
+    if not isinstance(pcd_gt, bool):
+        pcd_gt = np.asarray(pcd_gt.points)
+
     # FIRST: Slice in first dimension
     for bb_first_dim in range(int(num_iterations_first_dim)):
         # Define bounds of bounding box
@@ -170,6 +174,12 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
 
         # Get points inside bounding box from point cloud
         slice_pcd_array = pcd[bb_filter]
+
+        if not isinstance(pcd_gt,bool):
+            #pcd_gt = np.asarray(pcd_gt.points)
+            bb_filter_gt = bounding_box(pcd_gt, first_dim, min_first_dim_bound, max_first_dim_bound)
+            slice_pcd_gt_array = pcd_gt[bb_filter_gt]
+
 
         # Move window
         first_dim_bound = first_dim_bound + hist_window_size*bb_free
@@ -191,8 +201,13 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
             # Slice point cloud in given dimension using bounding box
             bb_filter = bounding_box(slice_pcd_array, second_dim, min_second_dim_bound, max_second_dim_bound)
 
+
             # Get points inside bounding box from point cloud
             bb_pcd_array = slice_pcd_array[bb_filter]
+
+            if not isinstance(pcd_gt, bool):
+                bb_filter_gt = bounding_box(slice_pcd_gt_array, second_dim, min_second_dim_bound, max_second_dim_bound)
+                bb_pcd_gt_array = slice_pcd_gt_array[bb_filter_gt]
 
             # Save points for histogram visualization
             if FLAGS.evaluation and plot_histogram:
@@ -213,6 +228,8 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
             # Choose which variant is used as estimate for the y-coordinate
             if estimation_variant == 'mean':
                 estimate_road_coordinate = np.mean(bb_pcd_array, axis=0)
+                if not isinstance(pcd_gt, bool):
+                    gt_road_coordinate = np.mean(bb_pcd_gt_array, axis=0)
             elif estimation_variant == 'median':
                 estimate_road_coordinate = np.median(bb_pcd_array, axis=0)
             else:
@@ -221,9 +238,14 @@ def slice_in_given_dimension(pcd, hist_window_size, bb_overlap, slice_dimensions
 
             # Append new coordinate points to list
             est_road_profile.append(estimate_road_coordinate)
+            if not isinstance(pcd_gt, bool):
+                error.append(np.abs(estimate_road_coordinate[1]) - np.abs(gt_road_coordinate[1]))
 
     # Plot histogram of road crossing
     if FLAGS.evaluation and plot_histogram:
         histogram_from_bounding_boxes(histogram_points)
+
+    if not isinstance(pcd_gt, bool):
+        print(np.mean(np.abs(error)))
 
     return est_road_profile

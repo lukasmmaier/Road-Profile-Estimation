@@ -392,7 +392,8 @@ def preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234, pose_1, rotatio
 
 
 @gin.configurable
-def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim, pcd_gt=False):
+def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim,
+                            gt_est_name, est_name, sec_est_name, pcd_gt=False, pcd_sec_est=False):
     """Road cross section plot.
     Args:
         pcd (object): Open3D point cloud data (=MonoRec output)
@@ -406,6 +407,15 @@ def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotatio
     in_y_coord, in_x_coord, out_y_coord, out_x_coord = preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234,
                                                                                pose_1, rotation_angle, plot_type='cross')
 
+    if pcd_gt:
+        _, _, y_values_gt, z_values_gt = preprocess_pcd_for_plot(pcd, pcd_gt, point_1234,
+                                                                                   pose_1, rotation_angle, plot_type='cross')
+
+    if pcd_sec_est:
+        _, _, y_values_sec, z_values_sec = preprocess_pcd_for_plot(pcd, pcd_sec_est, point_1234,
+                                                                                   pose_1, rotation_angle, plot_type='cross')
+
+
     if len(out_y_coord) == 0:
         print('No points available for road cross section plot!')
         print('Plot is skipped!')
@@ -416,9 +426,12 @@ def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotatio
     ax.set_axisbelow(True)
 
     # Plot Y against X
-    ax.scatter(in_x_coord, in_y_coord, color='silver', label='MonoRec')
-    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
-    ax.scatter(out_x_coord, out_y_coord, color='blue', label='post processing')
+    #ax.scatter(in_x_coord, in_y_coord, color='silver', label=est_name)
+    if pcd_gt:
+        ax.scatter(z_values_gt, y_values_gt, color='orange', label=gt_est_name)
+    if pcd_sec_est:
+        ax.scatter(z_values_sec, y_values_sec, color='green', label=sec_est_name)
+    ax.scatter(out_x_coord, out_y_coord, color='blue', label= est_name)
 
     # Configure axes
     ax.set_xlabel('road width [meters]', fontsize=16)
@@ -432,11 +445,12 @@ def road_cross_section_plot(pcd, pcd_post_processed, point_1234, pose_1, rotatio
     plt.grid()
     plt.ylim(y_axis_lim)
     plt.tight_layout()
-    #plt.savefig('plot_cross.png', dpi=300)
+    plt.savefig('plot_cross.png', dpi=300)
     plt.show()
 
 @gin.configurable
-def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim, pcd_gt=False):
+def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, rotation_angle, y_axis_lim,
+                                   gt_est_name, est_name, sec_est_name, pcd_gt=False, pcd_sec_est=False):
     """Road longitudinal section plot => Y-Z-Plot (Height-Depth-Plot).
         Args:
             pcd (object): Open3D point cloud data (=MonoRec output)
@@ -450,6 +464,15 @@ def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, 
     in_y_coord, in_z_coord, out_y_coord, out_z_coord = preprocess_pcd_for_plot(pcd, pcd_post_processed, point_1234,
                                                                                pose_1, rotation_angle, plot_type='long')
 
+    if pcd_gt:
+        _, _, y_values_gt, z_values_gt = preprocess_pcd_for_plot(pcd, pcd_gt, point_1234,
+                                                                                   pose_1, rotation_angle, plot_type='long')
+
+    if pcd_sec_est:
+        _, _, y_values_sec, z_values_sec = preprocess_pcd_for_plot(pcd, pcd_sec_est, point_1234,
+                                                                                   pose_1, rotation_angle, plot_type='long')
+
+
     if len(out_y_coord) == 0:
         print('No points available for longitudinal cross section plot!')
         print('Plot is skipped!')
@@ -460,9 +483,12 @@ def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, 
     ax.set_axisbelow(True)
 
     # Plot Y against Z
-    ax.scatter(in_z_coord, in_y_coord, color='silver', label='MonoRec')
-    #ax.scatter(z_values_gt, y_values_gt, color='grey', label='LiDAR')
-    ax.scatter(out_z_coord, out_y_coord, color='blue', label='post processing')
+    #ax.scatter(in_z_coord, in_y_coord, color='silver', label=est_name)
+    if pcd_gt:
+        ax.scatter(z_values_gt, y_values_gt, color='orange', label=gt_est_name)
+    if pcd_sec_est:
+        ax.scatter(z_values_sec, y_values_sec, color='green', label=sec_est_name)
+    ax.scatter(out_z_coord, out_y_coord, color='blue', label= est_name)
 
     # Configure axes
     ax.set_xlabel('road depth [meters]', fontsize=16)
@@ -475,12 +501,12 @@ def road_longitudinal_profile_plot(pcd, pcd_post_processed, point_1234, pose_1, 
     plt.ylim(y_axis_lim)
     plt.tight_layout()
     plt.grid()
-    #plt.savefig('plot_long.png', dpi=300)
+    plt.savefig('plot_long.png', dpi=300)
     plt.show()
 
 
 @gin.configurable
-def extract_road(pcd, post_processing_mode, pcd_gt=False):
+def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_plots=True):
     """Roadway extraction step.
     Args:
         pcd (object): Open3D point cloud data.
@@ -563,18 +589,18 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False):
     print('Runtime:', runtime)
 
     if post_processing_mode == 'sequential':
-        point_array = slice_in_given_dimension(point_array)
+        point_array = slice_in_given_dimension(point_array, pcd_gt=pcd_gt)
 
     # Convert numpy array to pcd
     pcd_post_processed = o3d.geometry.PointCloud()
     pcd_post_processed.points = o3d.utility.Vector3dVector(point_array)
 
-    if FLAGS.evaluation:
+    if FLAGS.evaluation and do_plots:
         if long_plot_start_marker != -1:
             # Visualize road longitudinal section plot
-            road_longitudinal_profile_plot(pcd, pcd_post_processed, long_plot_point_1234, long_plot_pose_1)
+            road_longitudinal_profile_plot(pcd, pcd_post_processed, long_plot_point_1234, long_plot_pose_1, pcd_gt=pcd_gt, pcd_sec_est=pcd_sec_est)
         if cross_plot_start_marker != -1:
             # Visualize road cross section plot
-            road_cross_section_plot(pcd, pcd_post_processed, cross_plot_point_1234, cross_plot_pose_1)
+            road_cross_section_plot(pcd, pcd_post_processed, cross_plot_point_1234, cross_plot_pose_1, pcd_gt=pcd_gt, pcd_sec_est=pcd_sec_est)
 
     return pcd_post_processed, center
