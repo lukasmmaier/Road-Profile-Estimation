@@ -526,6 +526,8 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_
     # Get poses for extraction
     poses_list, long_plot_start_marker, cross_plot_start_marker = get_poses()
     point_array = []
+    gt_point_array = []
+    sec_point_array = []
     center = False
 
     # Runtime measurement
@@ -548,6 +550,17 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_
 
         # Roadway extraction step
         raw_selection, full_height_raw_selection = select_points_in_volume(pcd, corner_points)
+
+        if not isinstance(pcd_gt, bool):
+            gt_raw_selection, _ = select_points_in_volume(pcd_gt, corner_points)
+        else:
+            gt_raw_selection = False
+
+        if not isinstance(pcd_sec_est, bool):
+            sec_raw_selection, _ = select_points_in_volume(pcd_sec_est, corner_points)
+        else:
+            sec_raw_selection = False
+
 
         # Save necessary points for evaluation/plots
         if FLAGS.evaluation:
@@ -574,7 +587,7 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_
             continue
 
         if post_processing_mode == 'alternating':
-            point_selection = slice_in_given_dimension(raw_selection)
+            point_selection, _, _ = slice_in_given_dimension(raw_selection)
         else:
             point_selection = raw_selection
 
@@ -583,17 +596,37 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_
         else:
             point_array = np.append(point_array, point_selection, axis=0)
 
+        if not isinstance(pcd_gt, bool):
+            if gt_point_array == []:
+                gt_point_array = gt_raw_selection
+            else:
+                gt_point_array = np.append(gt_point_array, gt_raw_selection, axis=0)
+
+        if not isinstance(pcd_sec_est, bool):
+            if sec_point_array == []:
+                sec_point_array = sec_raw_selection
+            else:
+                sec_point_array = np.append(sec_point_array, sec_raw_selection, axis=0)
+
     # Calculate and print runtime
     end_time = time.time()
     runtime = end_time - start_time
     print('Runtime:', runtime)
 
     if post_processing_mode == 'sequential':
-        point_array = slice_in_given_dimension(point_array, pcd_gt=pcd_gt)
+        point_array, gt, sec = slice_in_given_dimension(point_array, pcd_gt=gt_point_array, pcd_sec_est=sec_point_array)
 
     # Convert numpy array to pcd
     pcd_post_processed = o3d.geometry.PointCloud()
     pcd_post_processed.points = o3d.utility.Vector3dVector(point_array)
+
+    if not isinstance(pcd_gt, bool):
+        pcd_gt = o3d.geometry.PointCloud()
+        pcd_gt.points = o3d.utility.Vector3dVector(gt[0])
+
+    if not isinstance(pcd_sec_est, bool):
+        pcd_sec_est = o3d.geometry.PointCloud()
+        pcd_sec_est.points = o3d.utility.Vector3dVector(sec[0])
 
     if FLAGS.evaluation and do_plots:
         if long_plot_start_marker != -1:
@@ -603,4 +636,4 @@ def extract_road(pcd, post_processing_mode, pcd_gt=False, pcd_sec_est=False, do_
             # Visualize road cross section plot
             road_cross_section_plot(pcd, pcd_post_processed, cross_plot_point_1234, cross_plot_pose_1, pcd_gt=pcd_gt, pcd_sec_est=pcd_sec_est)
 
-    return pcd_post_processed, center
+    return pcd_post_processed, center, [pcd_gt, gt[1]], [pcd_sec_est, sec[1]]

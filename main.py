@@ -2,9 +2,10 @@ import gin
 import os
 from absl import app, flags
 import open3d as o3d
+import numpy as np
 
 import extract_road
-import compare_final_pcd
+from evaluate_error import compute_metrics
 from preprocessing.evaluation_processing import process_for_evaluation
 from utils_and_tools.o3d_tools import rotate_pcd, remove_points_within_radius
 
@@ -24,46 +25,47 @@ def main(argv):
 
     if use_gt:
         pcd_gt = load_point_cloud(filename=pcd_gt_filename)
-        gt_road_profile_reconstruction, _ = extract_road.extract_road(pcd_gt, do_plots=False)
     else:
-        gt_road_profile_reconstruction = False
+        pcd_gt = False
 
     if use_sec_est:
         pcd_sec_est = load_point_cloud(filename=pcd_sec_est_filename)
-        sec_est_road_profile_reconstruction, _ = extract_road.extract_road(pcd_sec_est, do_plots=False)
     else:
-        sec_est_road_profile_reconstruction = False
+        pcd_sec_est = False
+
+    _, ind = pcd.remove_radius_outlier(nb_points=30, radius=0.1)
+    pcd = pcd.select_by_index(ind)
 
     # Post processing module => Roadway extraction + Denonoising
-    road_profile_reconstruction, center = extract_road.extract_road(pcd, pcd_gt=gt_road_profile_reconstruction,
-                                                                    pcd_sec_est=sec_est_road_profile_reconstruction)
+    # gt = [gt_road_profile, error_est_gt]; sec = [sec_road_profile, error_sec_gt]
+    road_profile_reconstruction, center, gt, sec = extract_road.extract_road(pcd, pcd_gt=pcd_gt,
+                                                                             pcd_sec_est=pcd_sec_est)
 
     # Rotate estimates 180° - MonoRec outputs estimates upside down
     road_profile_reconstruction = rotate_pcd(road_profile_reconstruction, [180, 0, 0], center)
     pcd = rotate_pcd(pcd, [180, 0, 0], center)
 
+    # Compute metrics
+    pcd_error_est_gt, _ = compute_metrics(gt[1], sec[1], center)
 
-    gt_road_profile_reconstruction = rotate_pcd(gt_road_profile_reconstruction, [180, 0, 0], center)
-    sec_est_road_profile_reconstruction = rotate_pcd(sec_est_road_profile_reconstruction, [180, 0, 0], center)
-    #compare_final_pcd.compare_pcd(road_profile_reconstruction, sec_est_road_profile_reconstruction, gt_road_profile_reconstruction)
-
-    # Visualize estimate
-    #o3d.visualization.draw_geometries([road_profile_reconstruction])
+    pcd_list = [road_profile_reconstruction, pcd_error_est_gt]
 
     # Further visualizations for evaluation
     if FLAGS.evaluation:
+
         angle_x, angle_z = load_configuration_for_evaluation()
 
         # Rotate pcd if desired and custom colorize the height information
         pcd = rotate_pcd(pcd, [angle_x, 0, angle_z], center)
-        road_profile_reconstruction, pcd = process_for_evaluation(road_profile_reconstruction, pcd,
-                                                                  [angle_x, 0, angle_z], center)
 
         # Remove road profile points from MonoRec pcd and input post processing pcd for visualization
-        _, ind = pcd.remove_radius_outlier(nb_points=15, radius=0.1)
-        pcd = pcd.select_by_index(ind)
-        pcd = remove_points_within_radius(pcd, road_profile_reconstruction)
-        o3d.visualization.draw_geometries([pcd, road_profile_reconstruction])
+        #_, ind = pcd.remove_radius_outlier(nb_points=15, radius=0.1)
+        #pcd = pcd.select_by_index(ind)
+
+        for est_pcd in pcd_list:
+            est_pcd, pcd = process_for_evaluation(est_pcd, pcd, [angle_x, 0, angle_z], center)
+            pcd = remove_points_within_radius(pcd, est_pcd)
+            o3d.visualization.draw_geometries([pcd, est_pcd])
 
 
 @gin.configurable
